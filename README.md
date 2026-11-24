@@ -1,7 +1,9 @@
 # 🎮 MAZE ESCAPE
-ANGGARAINI 2617051002
-ZAHRA DHITA RAHMADANI 2617051007
-MUHAMMAD AMINNAWLOH 2617051044
+ANGGOTA KELOMPOK :
+
+- ANGGARAINI 2617051002
+- ZAHRA DHITA RAHMADANI 2617051007
+- MUHAMMAD AMINNAWLOH 2617051044
 
 **MAZE ESCAPE** adalah game petualangan berbasis terminal yang dikembangkan menggunakan bahasa C++ dan library ncurses. Pemain harus menjelajahi labirin, menghindari monster dan jebakan, mengumpulkan item, serta menemukan jalan keluar untuk menyelesaikan setiap level.
 
