@@ -432,3 +432,425 @@ int subtitleX = (COLS - static_cast<int>(subtitle.length())) / 2;
 
 mvprintw(9, subtitleX, "%s", subtitle.c_str());
 }
+
+// MAZE GENERATION
+void generateMaze(Game& game) {
+    game.maze.assign(MAP_H, string(MAP_W, '#'));
+
+    vector<Position> stack;
+    stack.push_back({1, 1});
+    game.maze[1][1] = ' ';
+
+    const int dy[] = {-2, 2, 0, 0};
+    const int dx[] = {0, 0, -2, 2};
+
+    while (!stack.empty()) {
+        Position current = stack.back();
+
+        vector<int> dirs = {0, 1, 2, 3};
+        shuffleVector(dirs);
+
+        bool moved = false;
+
+        for (int dir : dirs) {
+            int ny = current.y + dy[dir];
+            int nx = current.x + dx[dir];
+
+            if (ny > 0 && ny < MAP_H - 1 &&
+                nx > 0 && nx < MAP_W - 1 &&
+                game.maze[ny][nx] == '#') {
+
+                game.maze[current.y + dy[dir] / 2]
+                          [current.x + dx[dir] / 2] = ' ';
+
+                game.maze[ny][nx] = ' ';
+                stack.push_back({ny, nx});
+
+                moved = true;
+                break;
+            }
+        }
+
+        if (!moved) stack.pop_back();
+    }
+
+    // Create additional loops.
+    for (int i = 0; i < 35 + game.level * 12; i++) {
+        int y = randomInt(1, MAP_H - 2);
+        int x = randomInt(1, MAP_W - 2);
+
+        if (game.maze[y][x] != '#') continue;
+
+        int neighbors = 0;
+
+        if (game.maze[y - 1][x] == ' ') neighbors++;
+        if (game.maze[y + 1][x] == ' ') neighbors++;
+        if (game.maze[y][x - 1] == ' ') neighbors++;
+        if (game.maze[y][x + 1] == ' ') neighbors++;
+
+        if (neighbors >= 2) game.maze[y][x] = ' ';
+    }
+
+    // Expand connected rooms from existing corridors.
+    for (int room = 0; room < 5; room++) {
+        vector<Position> floors;
+
+        for (int y = 2; y < MAP_H - 2; y++) {
+            for (int x = 2; x < MAP_W - 2; x++) {
+                if (game.maze[y][x] == ' ') {
+                    floors.push_back({y, x});
+                }
+            }
+        }
+
+        if (floors.empty()) continue;
+
+        Position center = floors[randomInt(0, static_cast<int>(floors.size()) - 1)];
+
+        int ry = randomInt(1, 2);
+        int rx = randomInt(2, 3);
+
+        for (int y = center.y - ry; y <= center.y + ry; y++) {
+            for (int x = center.x - rx; x <= center.x + rx; x++) {
+                if (insideMap(y, x)) game.maze[y][x] = ' ';
+            }
+        }
+    }
+
+    game.maze[1][1] = ' ';
+    game.maze[MAP_H - 2][MAP_W - 2] = ' ';
+}
+
+// OBJECT PLACEMENT
+bool occupied(const Game& game, int y, int x) {
+    if (y == game.playerY && x == game.playerX) return true;
+
+    if (y == MAP_H - 2 && x == MAP_W - 2) return true;
+
+    for (const auto& p : game.pickups) {
+        if (!p.taken && p.y == y && p.x == x) return true;
+    }
+
+    for (const auto& e : game.enemies) {
+        if (e.y == y && e.x == x) return true;
+    }
+
+    for (const auto& t : game.traps) {
+        if (!t.activated && t.y == y && t.x == x) return true;
+    }
+
+    return false;
+}
+
+Position randomFloor(const Game& game) {
+    for (int attempt = 0; attempt < 5000; attempt++) {
+        int y = randomInt(1, MAP_H - 2);
+        int x = randomInt(1, MAP_W - 2);
+
+        if (game.maze[y][x] == ' ' && !occupied(game, y, x)) {
+            return {y, x};
+        }
+    }
+
+    for (int y = 1; y < MAP_H - 1; y++) {
+        for (int x = 1; x < MAP_W - 1; x++) {
+            if (game.maze[y][x] == ' ' && !occupied(game, y, x)) {
+                return {y, x};
+            }
+        }
+    }
+
+    return {1, 1};
+}
+
+void addPickup(Game& game, char type) {
+    Position p = randomFloor(game);
+    game.pickups.push_back({p.y, p.x, type, false});
+}
+
+void placeObjects(Game& game) {
+    game.pickups.clear();
+    game.enemies.clear();
+    game.traps.clear();
+
+    game.hasKey = false;
+    game.crystals = 0;
+    game.requiredCrystals = 2 + game.level;
+
+    addPickup(game, 'K');
+
+    for (int i = 0; i < game.requiredCrystals; i++) {
+        addPickup(game, 'G');
+    }
+
+    for (int i = 0; i < 7 + game.level * 2; i++) {
+        addPickup(game, '$');
+    }
+
+    for (int i = 0; i < 3 + game.level; i++) {
+        Position p = randomFloor(game);
+        game.traps.push_back({p.y, p.x, false});
+    }
+
+    // Exactly 5 monsters per level.
+    // 2 hunters and 3 patrol monsters.
+    for (int i = 0; i < 5; i++) {
+        Position p = randomFloor(game);
+        game.enemies.push_back({p.y, p.x, i < 2});
+    }
+}
+
+// LEVEL
+string levelName(int level) {
+    if (level == 1) return "ANCIENT ENTRANCE";
+    if (level == 2) return "FORGOTTEN DUNGEON";
+    return "LOST TEMPLE";
+}
+
+void loadLevel(Game& game, int level) {
+    game.level = level;
+    game.playerY = 1;
+    game.playerX = 1;
+
+    generateMaze(game);
+    placeObjects(game);
+
+    game.message = "Find the key, collect crystals and escape!";
+
+    game.lastEnemyMove = steady_clock::now();
+    game.lastDamage = steady_clock::now() - seconds(3);
+}
+
+void initializeGame(Game& game) {
+    game.hp = game.maxHP;
+    game.score = 0;
+    game.coins = 0;
+    game.crystals = 0;
+
+    loadLevel(game, 1);
+}
+
+// ITEM COLLECTION
+void collectItems(Game& game) {
+    for (auto& item : game.pickups) {
+        if (item.taken) continue;
+
+        if (item.y == game.playerY &&
+            item.x == game.playerX) {
+
+            item.taken = true;
+
+            switch (item.type) {
+                case 'K':
+                    game.hasKey = true;
+                    game.score += 100;
+                    game.message = "Ancient key acquired!";
+                    playSound(1);
+                    break;
+
+                case 'G':
+                    game.crystals++;
+                    game.score += 150;
+                    game.message = "Crystal collected! +150 points";
+                    playSound(1);
+                    break;
+
+                case '$':
+                    game.coins++;
+                    game.score += 25;
+                    game.message = "Treasure collected! +25 points";
+                    playSound(1);
+                    break;
+            }
+        }
+    }
+}
+
+// DAMAGE
+void damagePlayer(Game& game, const string& reason, int sound = 2) {
+    auto now = steady_clock::now();
+
+    if (duration_cast<milliseconds>(
+        now - game.lastDamage).count() < 1100) {
+        return;
+    }
+
+    game.hp--;
+    game.lastDamage = now;
+    game.message = reason;
+
+    playSound(sound);
+}
+
+// PLAYER
+bool exitUnlocked(const Game& game) {
+    return game.hasKey &&
+           game.crystals >= game.requiredCrystals;
+}
+
+void movePlayer(Game& game, int dy, int dx) {
+    int ny = game.playerY + dy;
+    int nx = game.playerX + dx;
+
+    if (!insideMap(ny, nx)) return;
+    if (game.maze[ny][nx] == '#') return;
+
+    // Exit gate
+    if (ny == MAP_H - 2 && nx == MAP_W - 2) {
+        if (exitUnlocked(game)) {
+            game.playerY = ny;
+            game.playerX = nx;
+            game.message = "You escaped this dungeon!";
+        }
+        else {
+            game.message = "Find the key and all crystals first!";
+        }
+        return;
+    }
+
+    // Avoid walking directly into a monster.
+    for (const auto& enemy : game.enemies) {
+        if (enemy.y == ny && enemy.x == nx) {
+            damagePlayer(game, "A monster attacked you!");
+            return;
+        }
+    }
+
+    game.playerY = ny;
+    game.playerX = nx;
+
+    collectItems(game);
+
+    for (auto& trap : game.traps) {
+        if (!trap.activated &&
+            trap.y == game.playerY &&
+            trap.x == game.playerX) {
+
+            trap.activated = true;
+            damagePlayer(game, "You stepped on a hidden trap!", 5);
+            break;
+        }
+    }
+}
+
+// ENEMY AI
+void updateEnemies(Game& game) {
+    auto now = steady_clock::now();
+
+    int interval = 850 - game.difficulty * 150;
+
+    if (duration_cast<milliseconds>(
+        now - game.lastEnemyMove).count() < interval) {
+        return;
+    }
+
+    game.lastEnemyMove = now;
+
+    const int dy[] = {-1, 1, 0, 0};
+    const int dx[] = {0, 0, -1, 1};
+
+    for (auto& enemy : game.enemies) {
+        vector<int> dirs = {0, 1, 2, 3};
+
+        if (enemy.hunter) {
+            sort(dirs.begin(), dirs.end(),
+                [&](int a, int b) {
+                    int da = distanceBetween(
+                        enemy.y + dy[a], enemy.x + dx[a],
+                        game.playerY, game.playerX);
+
+                    int db = distanceBetween(
+                        enemy.y + dy[b], enemy.x + dx[b],
+                        game.playerY, game.playerX);
+
+                    return da < db;
+                });
+        }
+        else {
+            shuffleVector(dirs);
+        }
+
+        for (int dir : dirs) {
+            int ny = enemy.y + dy[dir];
+            int nx = enemy.x + dx[dir];
+
+            if (!insideMap(ny, nx)) continue;
+            if (game.maze[ny][nx] == '#') continue;
+
+            if (ny == MAP_H - 2 && nx == MAP_W - 2) continue;
+
+            if (ny == game.playerY && nx == game.playerX) {
+                damagePlayer(game, "A monster caught you!");
+                break;
+            }
+
+            bool blocked = false;
+
+            for (const auto& other : game.enemies) {
+                if (&other != &enemy &&
+                    other.y == ny && other.x == nx) {
+                    blocked = true;
+                    break;
+                }
+            }
+
+            if (blocked) continue;
+
+            enemy.y = ny;
+            enemy.x = nx;
+            break;
+        }
+    }
+}
+
+// HUD
+void drawHUD(const Game& game) {
+    printColored(1, 3, C_TITLE, "MAZE ESCAPE");
+
+    printColored(2, 3, C_COIN, levelName(game.level));
+    printColored(3, 3, C_DIM, "ANCIENT MYSTERY DUNGEON");
+
+    drawFrame(4, SIDE_X, 22, COLS - SIDE_X - 2, C_PANEL);
+
+    printColored(6, SIDE_X + 2, C_TITLE, "PLAYER STATUS");
+
+    mvprintw(8, SIDE_X + 2, "HEALTH");
+
+    for (int i = 0; i < game.maxHP; i++) {
+        if (i < game.hp) {
+            attron(COLOR_PAIR(C_HP) | A_BOLD);
+            mvaddch(9, SIDE_X + 2 + i * 2, ACS_DIAMOND);
+            attroff(COLOR_PAIR(C_HP) | A_BOLD);
+        }
+        else {
+            attron(COLOR_PAIR(C_DIM));
+            mvaddch(9, SIDE_X + 2 + i * 2, '.');
+            attroff(COLOR_PAIR(C_DIM));
+        }
+    }
+
+    mvprintw(11, SIDE_X + 2, "SCORE    : %d", game.score);
+    mvprintw(12, SIDE_X + 2, "TREASURE : %d", game.coins);
+    mvprintw(13, SIDE_X + 2, "CRYSTAL  : %d/%d",
+             game.crystals, game.requiredCrystals);
+
+    mvprintw(14, SIDE_X + 2, "KEY      : ");
+
+    if (game.hasKey) {
+        printColored(14, SIDE_X + 13, C_SUCCESS, "YES");
+    }
+    else {
+        printColored(14, SIDE_X + 13, C_WARNING, "NO");
+    }
+
+    printColored(16, SIDE_X + 2, C_TITLE, "OBJECTIVE");
+
+    mvprintw(18, SIDE_X + 2, "1. Find the key");
+    mvprintw(19, SIDE_X + 2, "2. Collect crystals");
+    mvprintw(20, SIDE_X + 2, "3. Find the exit");
+
+    printColored(22, SIDE_X + 2, C_COIN, "CONTROLS");
+    mvprintw(23, SIDE_X + 2, "WASD / ARROWS");
+    mvprintw(24, SIDE_X + 2, "P : PAUSE");
+    mvprintw(25, SIDE_X + 2, "ESC : MENU");
+}
